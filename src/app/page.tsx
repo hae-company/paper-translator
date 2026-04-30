@@ -5,6 +5,7 @@ import { PdfUploader } from "@/components/pdf-uploader";
 import { DualView } from "@/components/dual-view";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { Footer } from "@/components/footer";
+import { LoadingScreen } from "@/components/loading-screen";
 import { loadPdf, extractPageData, type PageData } from "@/lib/pdf-extract";
 import { getDarkMode, setDarkMode, getProvider, getApiKey } from "@/lib/storage";
 
@@ -57,6 +58,7 @@ export default function Home() {
 
   return (
     <div className="flex flex-col h-screen">
+      <LoadingScreen />
       <header className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 flex-shrink-0">
         <div className="flex items-center gap-3">
           <h1 className="text-lg font-bold tracking-tight cursor-pointer" onClick={reset}>
@@ -96,7 +98,7 @@ export default function Home() {
 
       <main className="flex-1 overflow-hidden">
         {pdf && pages ? (
-          <DualView pdf={pdf} pages={pages} />
+          <DualView pdf={pdf} pages={pages} fileName={fileName} />
         ) : (
           <div className="flex flex-col items-center justify-center h-full px-4">
             <div className="w-full max-w-xl">

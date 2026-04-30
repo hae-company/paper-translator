@@ -3,20 +3,23 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import type { PageData } from "@/lib/pdf-extract";
 import { getApiKey, getProvider, getGlossary } from "@/lib/storage";
+import { SaveDialog } from "./save-dialog";
 
 interface Props {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   pdf: any;
   pages: PageData[];
+  fileName: string;
 }
 
-export function DualView({ pdf, pages }: Props) {
+export function DualView({ pdf, pages, fileName }: Props) {
   const [currentPage, setCurrentPage] = useState(1);
   const [translations, setTranslations] = useState<Record<string, string>>({});
   const [translatingIdx, setTranslatingIdx] = useState<number | null>(null);
   const [showTranslation, setShowTranslation] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
+  const [saveOpen, setSaveOpen] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const renderTaskRef = useRef<{ cancel: () => void } | null>(null);
 
@@ -165,6 +168,16 @@ export function DualView({ pdf, pages }: Props) {
           </button>
         )}
 
+        {/* Save button */}
+        {Object.keys(translations).length > 0 && (
+          <button
+            onClick={() => setSaveOpen(true)}
+            className="px-3 py-1.5 text-sm border border-zinc-300 dark:border-zinc-700 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800"
+          >
+            저장
+          </button>
+        )}
+
         {isPageTranslated && (
           <span className="text-xs text-zinc-400 ml-auto">
             {translatedCount}/{sentences.length} 문장
@@ -221,6 +234,14 @@ export function DualView({ pdf, pages }: Props) {
           })}
         </div>
       </div>
+
+      <SaveDialog
+        open={saveOpen}
+        onClose={() => setSaveOpen(false)}
+        pages={pages}
+        translations={translations}
+        fileName={fileName}
+      />
     </div>
   );
 }

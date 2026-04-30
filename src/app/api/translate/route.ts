@@ -77,22 +77,38 @@ export async function POST(req: NextRequest) {
 }
 
 async function callGemini(apiKey: string, prompt: string) {
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": apiKey,
-      },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+  const maxRetries = 3;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      }
+    );
+
+    if (res.status === 503 || res.status === 429) {
+      // Server busy or rate limited — wait and retry
+      const waitSec = (attempt + 1) * 3; // 3s, 6s, 9s
+      console.log(`Gemini ${res.status}, retrying in ${waitSec}s (attempt ${attempt + 1}/${maxRetries})`);
+      await new Promise(r => setTimeout(r, waitSec * 1000));
+      continue;
     }
-  );
-  if (!res.ok) throw new Error(await res.text());
-  const data = await res.json();
-  return Response.json({
-    translation: data.candidates?.[0]?.content?.parts?.[0]?.text || "번역 실패",
-  });
+
+    if (!res.ok) throw new Error(await res.text());
+
+    const data = await res.json();
+    return Response.json({
+      translation: data.candidates?.[0]?.content?.parts?.[0]?.text || "번역 실패",
+    });
+  }
+
+  throw new Error("Gemini 서버가 계속 응답하지 않습니다. 잠시 후 다시 시도해주세요.");
 }
 
 async function callClaude(apiKey: string, prompt: string) {

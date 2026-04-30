@@ -1,226 +1,223 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
-import type { ParagraphBlock } from "@/lib/pdf-extract";
+import { useState, useCallback, useRef, useEffect } from "react";
+import type { PageData, TextBlock } from "@/lib/pdf-extract";
+import { renderPageToCanvas } from "@/lib/pdf-extract";
 import { getApiKey, getProvider, getGlossary } from "@/lib/storage";
 
 interface Props {
-  blocks: ParagraphBlock[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  pdf: any;
+  pages: PageData[];
 }
 
-export function DualView({ blocks }: Props) {
-  const [translations, setTranslations] = useState<Record<number, string>>({});
-  const [translating, setTranslating] = useState<number | null>(null);
-  const [progress, setProgress] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [activeBlock, setActiveBlock] = useState<number | null>(null);
-  const rightRef = useRef<HTMLDivElement>(null);
+// Group nearby text items into lines
+function groupIntoLines(blocks: TextBlock[]): { text: string; x: number; y: number; width: number; height: number; fontSize: number }[] {
+  if (blocks.length === 0) return [];
 
-  const translateAll = useCallback(async () => {
+  const sorted = [...blocks].sort((a, b) => a.y - b.y || a.x - b.x);
+  const lines: typeof sorted = [];
+  let current = { ...sorted[0] };
+
+  for (let i = 1; i < sorted.length; i++) {
+    const b = sorted[i];
+    // Same line if Y is close
+    if (Math.abs(b.y - current.y) < current.fontSize * 0.5) {
+      current.text += b.text;
+      current.width = b.x + b.width - current.x;
+    } else {
+      lines.push(current);
+      current = { ...b };
+    }
+  }
+  lines.push(current);
+  return lines;
+}
+
+export function DualView({ pdf, pages }: Props) {
+  const [currentPage, setCurrentPage] = useState(1);
+  const [translations, setTranslations] = useState<Record<string, string>>({});
+  const [translatingPage, setTranslatingPage] = useState<number | null>(null);
+  const [showOverlay, setShowOverlay] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const page = pages[currentPage - 1];
+
+  // Render PDF page to canvas
+  useEffect(() => {
+    if (!canvasRef.current || !pdf) return;
+    renderPageToCanvas(pdf, currentPage, canvasRef.current);
+  }, [pdf, currentPage]);
+
+  const translatePage = useCallback(async (pageNum: number) => {
     const provider = getProvider();
     const apiKey = getApiKey(provider);
     const glossary = getGlossary();
 
     if (!apiKey) {
-      setError("API 키를 먼저 설정해주세요 (우측 상단 설정 버튼)");
+      setError("API 키를 먼저 설정해주세요 (우측 상단 AI 설정)");
       return;
     }
 
+    const pageData = pages[pageNum - 1];
+    const lines = groupIntoLines(pageData.blocks);
+
+    setTranslatingPage(pageNum);
     setError(null);
 
-    for (let i = 0; i < blocks.length; i++) {
-      setTranslating(i);
-      setProgress(((i) / blocks.length) * 100);
+    // Translate all lines of this page in one batch
+    const fullText = lines.map(l => l.text).join("\n");
 
-      try {
-        const res = await fetch("/api/translate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            text: blocks[i].text,
-            provider,
-            apiKey,
-            glossary,
-          }),
-        });
+    try {
+      const res = await fetch("/api/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: fullText, provider, apiKey, glossary }),
+      });
 
-        if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.error || "번역 실패");
-        }
-
+      if (!res.ok) {
         const data = await res.json();
-        setTranslations((prev) => ({ ...prev, [i]: data.translation }));
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "번역 실패";
-        setTranslations((prev) => ({ ...prev, [i]: `[오류] ${msg}` }));
-        if (msg.includes("API")) {
-          setError(msg);
-          break;
-        }
-      }
-    }
-
-    setTranslating(null);
-    setProgress(100);
-  }, [blocks]);
-
-  const translateSingle = useCallback(
-    async (index: number) => {
-      const provider = getProvider();
-      const apiKey = getApiKey(provider);
-      const glossary = getGlossary();
-
-      if (!apiKey) {
-        setError("API 키를 먼저 설정해주세요");
-        return;
+        throw new Error(data.error || `HTTP ${res.status}`);
       }
 
-      setTranslating(index);
-      setError(null);
+      const data = await res.json();
+      const translatedLines = data.translation.split("\n");
 
-      try {
-        const res = await fetch("/api/translate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            text: blocks[index].text,
-            provider,
-            apiKey,
-            glossary,
-          }),
-        });
-
-        if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.error || "번역 실패");
-        }
-
-        const data = await res.json();
-        setTranslations((prev) => ({ ...prev, [index]: data.translation }));
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "번역 실패";
-        setTranslations((prev) => ({
+      // Map translations back to line positions
+      for (let i = 0; i < lines.length; i++) {
+        const key = `${pageNum}-${i}`;
+        setTranslations(prev => ({
           ...prev,
-          [index]: `[오류] ${msg}`,
+          [key]: translatedLines[i] || lines[i].text,
         }));
       }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "번역 실패";
+      setError(msg);
+    }
 
-      setTranslating(null);
-    },
-    [blocks]
-  );
+    setTranslatingPage(null);
+  }, [pages]);
 
-  const downloadTranslation = useCallback(() => {
-    const lines = blocks.map((b, i) => {
-      const trans = translations[i] || "(미번역)";
-      return `=== Page ${b.pageNum} ===\n\n[원문]\n${b.text}\n\n[번역]\n${trans}\n`;
-    });
-    const blob = new Blob([lines.join("\n---\n\n")], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "translation.txt";
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [blocks, translations]);
-
-  const translatedCount = Object.keys(translations).length;
+  const lines = page ? groupIntoLines(page.blocks) : [];
+  const isPageTranslated = lines.some((_, i) => translations[`${currentPage}-${i}`]);
 
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50">
+      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 flex-shrink-0">
+        {/* Page navigation */}
         <button
-          onClick={translateAll}
-          disabled={translating !== null}
-          className="px-4 py-2 text-sm bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors"
+          onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+          disabled={currentPage <= 1}
+          className="px-2.5 py-1 text-sm border border-zinc-300 dark:border-zinc-700 rounded-lg disabled:opacity-30 hover:bg-zinc-100 dark:hover:bg-zinc-800"
         >
-          {translating !== null ? `번역 중... (${translating + 1}/${blocks.length})` : "전체 번역"}
+          &larr;
         </button>
-        {translatedCount > 0 && (
+        <span className="text-sm text-zinc-600 dark:text-zinc-400 min-w-[80px] text-center">
+          {currentPage} / {pages.length}
+        </span>
+        <button
+          onClick={() => setCurrentPage(p => Math.min(pages.length, p + 1))}
+          disabled={currentPage >= pages.length}
+          className="px-2.5 py-1 text-sm border border-zinc-300 dark:border-zinc-700 rounded-lg disabled:opacity-30 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+        >
+          &rarr;
+        </button>
+
+        <div className="w-px h-5 bg-zinc-300 dark:bg-zinc-700" />
+
+        {/* Translate this page */}
+        <button
+          onClick={() => translatePage(currentPage)}
+          disabled={translatingPage !== null}
+          className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+        >
+          {translatingPage === currentPage ? "번역 중..." : "이 페이지 번역"}
+        </button>
+
+        {/* Toggle overlay */}
+        {isPageTranslated && (
           <button
-            onClick={downloadTranslation}
-            className="px-4 py-2 text-sm border border-zinc-300 dark:border-zinc-700 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            onClick={() => setShowOverlay(!showOverlay)}
+            className={`px-3 py-1.5 text-sm border rounded-lg transition-colors ${
+              showOverlay
+                ? "border-blue-400 text-blue-600 bg-blue-50 dark:bg-blue-950/30"
+                : "border-zinc-300 dark:border-zinc-700 text-zinc-500"
+            }`}
           >
-            다운로드
+            {showOverlay ? "번역 보기" : "원문 보기"}
           </button>
         )}
-        <span className="text-xs text-zinc-400 ml-auto">
-          {translatedCount}/{blocks.length} 단락 번역됨
-        </span>
-      </div>
 
-      {/* Progress bar */}
-      {translating !== null && (
-        <div className="h-1 bg-zinc-200 dark:bg-zinc-800">
-          <div
-            className="h-full bg-blue-500 transition-all duration-300"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
-      )}
+        {/* Translate all pages */}
+        <button
+          onClick={async () => {
+            for (let i = 1; i <= pages.length; i++) {
+              await translatePage(i);
+            }
+          }}
+          disabled={translatingPage !== null}
+          className="px-3 py-1.5 text-sm border border-zinc-300 dark:border-zinc-700 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50 ml-auto"
+        >
+          전체 번역
+        </button>
+      </div>
 
       {/* Error */}
       {error && (
-        <div className="px-4 py-3 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 text-sm border-b border-red-200 dark:border-red-900 flex items-center gap-2">
-          <span className="text-lg">&#9888;</span>
-          <span>{error}</span>
+        <div className="px-4 py-2 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 text-sm border-b border-red-200 dark:border-red-900">
+          {error}
         </div>
       )}
 
-      {/* Dual panes */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Original */}
-        <div className="flex-1 overflow-y-auto p-4 border-r border-zinc-200 dark:border-zinc-800">
-          <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-3">
-            Original
-          </h3>
-          {blocks.map((block, i) => (
-            <div
-              key={i}
-              onClick={() => {
-                setActiveBlock(i);
-                if (!translations[i]) translateSingle(i);
-              }}
-              className={`mb-3 p-3 rounded-lg text-sm leading-relaxed cursor-pointer transition-all ${
-                activeBlock === i
-                  ? "bg-blue-50 dark:bg-blue-950/30 ring-1 ring-blue-300 dark:ring-blue-700"
-                  : "hover:bg-zinc-100 dark:hover:bg-zinc-800/50"
-              } ${translating === i ? "animate-pulse" : ""}`}
-            >
-              <span className="text-[10px] text-zinc-400 mr-2">p.{block.pageNum}</span>
-              {block.text}
-            </div>
-          ))}
-        </div>
+      {/* PDF view with translation overlay */}
+      <div ref={containerRef} className="flex-1 overflow-auto flex justify-center bg-zinc-200 dark:bg-zinc-900 p-4">
+        <div className="relative inline-block shadow-xl">
+          {/* Rendered PDF page */}
+          <canvas ref={canvasRef} className="block" />
 
-        {/* Translation */}
-        <div ref={rightRef} className="flex-1 overflow-y-auto p-4">
-          <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-3">
-            Translation
-          </h3>
-          {blocks.map((block, i) => (
+          {/* Translation overlay */}
+          {showOverlay && page && (
             <div
-              key={i}
-              className={`mb-3 p-3 rounded-lg text-sm leading-relaxed transition-all ${
-                activeBlock === i
-                  ? "bg-blue-50 dark:bg-blue-950/30 ring-1 ring-blue-300 dark:ring-blue-700"
-                  : ""
-              }`}
+              className="absolute top-0 left-0"
+              style={{ width: page.width, height: page.height }}
             >
-              <span className="text-[10px] text-zinc-400 mr-2">p.{block.pageNum}</span>
-              {translations[i] ? (
-                <span>{translations[i]}</span>
-              ) : translating === i ? (
-                <span className="text-zinc-400 animate-pulse">번역 중...</span>
-              ) : (
-                <span className="text-zinc-300 dark:text-zinc-600">
-                  원문을 클릭하면 번역됩니다
-                </span>
-              )}
+              {lines.map((line, i) => {
+                const key = `${currentPage}-${i}`;
+                const trans = translations[key];
+                if (!trans) return null;
+
+                return (
+                  <div
+                    key={key}
+                    className="absolute bg-white/90 dark:bg-zinc-900/90 px-0.5 text-zinc-900 dark:text-zinc-100 leading-tight"
+                    style={{
+                      left: line.x,
+                      top: line.y,
+                      width: Math.max(line.width, 100),
+                      minHeight: line.height,
+                      fontSize: Math.max(line.fontSize * 0.85, 8),
+                    }}
+                    title={line.text}
+                  >
+                    {trans}
+                  </div>
+                );
+              })}
             </div>
-          ))}
+          )}
+
+          {/* Loading overlay */}
+          {translatingPage === currentPage && (
+            <div className="absolute inset-0 bg-white/50 dark:bg-black/50 flex items-center justify-center">
+              <div className="bg-white dark:bg-zinc-800 px-6 py-3 rounded-xl shadow-lg text-sm">
+                번역 중...
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

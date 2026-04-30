@@ -1,18 +1,17 @@
 import { NextRequest } from "next/server";
+import { buildTranslationPrompt } from "@/lib/prompts";
 
 export async function POST(req: NextRequest) {
-  const { text, provider, apiKey, glossary } = await req.json();
-
-  if (!text || !provider || !apiKey) {
-    return new Response(JSON.stringify({ error: "Missing fields" }), {
-      status: 400,
-    });
-  }
-
-  const { buildTranslationPrompt } = await import("@/lib/prompts");
-  const prompt = buildTranslationPrompt(text, glossary || {});
-
   try {
+    const body = await req.json();
+    const { text, provider, apiKey, glossary } = body;
+
+    if (!text || !provider || !apiKey) {
+      return Response.json({ error: "Missing fields" }, { status: 400 });
+    }
+
+    const prompt = buildTranslationPrompt(text, glossary || {});
+
     if (provider === "gemini") {
       return await callGemini(apiKey, prompt);
     } else if (provider === "claude") {
@@ -20,12 +19,12 @@ export async function POST(req: NextRequest) {
     } else if (provider === "gpt") {
       return await callGPT(apiKey, prompt);
     }
-    return new Response(JSON.stringify({ error: "Unknown provider" }), {
-      status: 400,
-    });
+
+    return Response.json({ error: "Unknown provider" }, { status: 400 });
   } catch (err) {
+    console.error("Translate API error:", err);
     const message = err instanceof Error ? err.message : "Translation failed";
-    return new Response(JSON.stringify({ error: message }), { status: 500 });
+    return Response.json({ error: message }, { status: 500 });
   }
 }
 
@@ -35,23 +34,13 @@ async function callGemini(apiKey: string, prompt: string) {
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-      }),
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
     }
   );
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Gemini API error: ${err}`);
-  }
-
+  if (!res.ok) throw new Error(`Gemini: ${await res.text()}`);
   const data = await res.json();
-  const text =
-    data.candidates?.[0]?.content?.parts?.[0]?.text || "번역 실패";
-
-  return new Response(JSON.stringify({ translation: text }), {
-    headers: { "Content-Type": "application/json" },
+  return Response.json({
+    translation: data.candidates?.[0]?.content?.parts?.[0]?.text || "번역 실패",
   });
 }
 
@@ -69,18 +58,10 @@ async function callClaude(apiKey: string, prompt: string) {
       messages: [{ role: "user", content: prompt }],
     }),
   });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Claude API error: ${err}`);
-  }
-
+  if (!res.ok) throw new Error(`Claude: ${await res.text()}`);
   const data = await res.json();
-  const text =
-    data.content?.[0]?.text || "번역 실패";
-
-  return new Response(JSON.stringify({ translation: text }), {
-    headers: { "Content-Type": "application/json" },
+  return Response.json({
+    translation: data.content?.[0]?.text || "번역 실패",
   });
 }
 
@@ -96,17 +77,9 @@ async function callGPT(apiKey: string, prompt: string) {
       messages: [{ role: "user", content: prompt }],
     }),
   });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`GPT API error: ${err}`);
-  }
-
+  if (!res.ok) throw new Error(`GPT: ${await res.text()}`);
   const data = await res.json();
-  const text =
-    data.choices?.[0]?.message?.content || "번역 실패";
-
-  return new Response(JSON.stringify({ translation: text }), {
-    headers: { "Content-Type": "application/json" },
+  return Response.json({
+    translation: data.choices?.[0]?.message?.content || "번역 실패",
   });
 }

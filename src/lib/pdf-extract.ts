@@ -1,53 +1,79 @@
 import type { TextItem } from "pdfjs-dist/types/src/display/api";
 
-export interface ParagraphBlock {
-  pageNum: number;
+export interface TextBlock {
   text: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  fontSize: number;
 }
 
-export async function extractTextFromPdf(file: File): Promise<ParagraphBlock[]> {
+export interface PageData {
+  pageNum: number;
+  width: number;
+  height: number;
+  blocks: TextBlock[];
+}
+
+export async function loadPdf(file: File) {
   const pdfjsLib = await import("pdfjs-dist");
-
-  // Use local worker file copied to public/
   pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
-
   const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  return pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+}
 
-  const blocks: ParagraphBlock[] = [];
+export async function extractPageData(
+  pdf: { getPage: (n: number) => Promise<unknown>; numPages: number }
+): Promise<PageData[]> {
+  const pages: PageData[] = [];
 
   for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const page = await pdf.getPage(i) as any;
+    const viewport = page.getViewport({ scale: 1.5 });
     const content = await page.getTextContent();
 
-    let currentParagraph = "";
-    let lastY: number | null = null;
+    const blocks: TextBlock[] = [];
 
     for (const item of content.items) {
-      const textItem = item as TextItem;
-      if (!textItem.str) continue;
+      const t = item as TextItem;
+      if (!t.str || t.str.trim().length === 0) continue;
 
-      const y = textItem.transform[5];
+      const tx = t.transform;
+      const fontSize = Math.sqrt(tx[0] * tx[0] + tx[1] * tx[1]);
 
-      // New paragraph if Y position jumps significantly
-      if (lastY !== null && Math.abs(y - lastY) > 12) {
-        const trimmed = currentParagraph.trim();
-        if (trimmed.length > 10) {
-          blocks.push({ pageNum: i, text: trimmed });
-        }
-        currentParagraph = "";
-      }
-
-      currentParagraph += textItem.str + " ";
-      lastY = y;
+      blocks.push({
+        text: t.str,
+        x: tx[4] * 1.5, // scale factor
+        y: viewport.height - tx[5] * 1.5 - fontSize * 1.5, // flip Y
+        width: t.width * 1.5,
+        height: fontSize * 1.5 * 1.2,
+        fontSize: fontSize * 1.5,
+      });
     }
 
-    // Push remaining text
-    const trimmed = currentParagraph.trim();
-    if (trimmed.length > 10) {
-      blocks.push({ pageNum: i, text: trimmed });
-    }
+    pages.push({
+      pageNum: i,
+      width: viewport.width,
+      height: viewport.height,
+      blocks,
+    });
   }
 
-  return blocks;
+  return pages;
+}
+
+export async function renderPageToCanvas(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  pdf: any,
+  pageNum: number,
+  canvas: HTMLCanvasElement
+) {
+  const page = await pdf.getPage(pageNum);
+  const viewport = page.getViewport({ scale: 1.5 });
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  const ctx = canvas.getContext("2d")!;
+  await page.render({ canvasContext: ctx, viewport }).promise;
 }

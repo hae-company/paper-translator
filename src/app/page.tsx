@@ -5,11 +5,13 @@ import { PdfUploader } from "@/components/pdf-uploader";
 import { DualView } from "@/components/dual-view";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { Footer } from "@/components/footer";
-import { extractTextFromPdf, type ParagraphBlock } from "@/lib/pdf-extract";
+import { loadPdf, extractPageData, type PageData } from "@/lib/pdf-extract";
 import { getDarkMode, setDarkMode, getProvider, getApiKey } from "@/lib/storage";
 
 export default function Home() {
-  const [blocks, setBlocks] = useState<ParagraphBlock[] | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [pdf, setPdf] = useState<any>(null);
+  const [pages, setPages] = useState<PageData[] | null>(null);
   const [parsing, setParsing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [dark, setDark] = useState(false);
@@ -24,7 +26,7 @@ export default function Home() {
     const p = getProvider();
     setCurrentProvider(p);
     setHasKey(!!getApiKey(p));
-  }, [settingsOpen]); // re-check after settings close
+  }, [settingsOpen]);
 
   const toggleDark = () => {
     const next = !dark;
@@ -37,8 +39,10 @@ export default function Home() {
     setParsing(true);
     setFileName(file.name);
     try {
-      const result = await extractTextFromPdf(file);
-      setBlocks(result);
+      const pdfDoc = await loadPdf(file);
+      setPdf(pdfDoc);
+      const pageData = await extractPageData(pdfDoc);
+      setPages(pageData);
     } catch (err) {
       console.error("PDF parse error:", err);
     }
@@ -46,19 +50,16 @@ export default function Home() {
   }, []);
 
   const reset = () => {
-    setBlocks(null);
+    setPdf(null);
+    setPages(null);
     setFileName("");
   };
 
   return (
     <div className="flex flex-col h-screen">
-      {/* Header */}
-      <header className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-800">
+      <header className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 flex-shrink-0">
         <div className="flex items-center gap-3">
-          <h1
-            className="text-lg font-bold tracking-tight cursor-pointer"
-            onClick={reset}
-          >
+          <h1 className="text-lg font-bold tracking-tight cursor-pointer" onClick={reset}>
             Paper Translator
           </h1>
           {fileName && (
@@ -70,7 +71,7 @@ export default function Home() {
         <div className="flex items-center gap-2">
           <button
             onClick={toggleDark}
-            className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-sm transition-colors"
+            className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-sm"
             aria-label="Toggle dark mode"
           >
             {dark ? "\u2600" : "\u263D"}
@@ -83,26 +84,25 @@ export default function Home() {
                 : "border-zinc-300 dark:border-zinc-700"
             }`}
           >
-            {hasKey ? (
+            {hasKey && (
               <span className="text-[10px] bg-green-100 dark:bg-green-900/30 px-1.5 py-0.5 rounded text-green-700 dark:text-green-400 uppercase">
                 {currentProvider}
               </span>
-            ) : null}
+            )}
             AI 설정
           </button>
         </div>
       </header>
 
-      {/* Main content */}
       <main className="flex-1 overflow-hidden">
-        {blocks ? (
-          <DualView blocks={blocks} />
+        {pdf && pages ? (
+          <DualView pdf={pdf} pages={pages} />
         ) : (
           <div className="flex flex-col items-center justify-center h-full px-4">
             <div className="w-full max-w-xl">
               <PdfUploader onFileSelect={handleFile} loading={parsing} />
               <p className="text-center text-xs text-zinc-400 mt-4">
-                Gemini, Claude, GPT 중 선택하여 번역 (API 키 필요)
+                PDF를 올리면 원본 그대로 보여주고, 영어 텍스트만 한국어로 바꿔줍니다
               </p>
             </div>
           </div>

@@ -8,8 +8,8 @@ export interface ParagraphBlock {
 export async function extractTextFromPdf(file: File): Promise<ParagraphBlock[]> {
   const pdfjsLib = await import("pdfjs-dist");
 
-  // Use CDN worker to avoid bundling issues
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+  // Use local worker file copied to public/
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;

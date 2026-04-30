@@ -76,39 +76,62 @@ export async function POST(req: NextRequest) {
   }
 }
 
+// Free tier models ordered from lightest to heaviest
+const GEMINI_MODELS = [
+  "gemini-2.0-flash-lite",
+  "gemini-2.0-flash",
+  "gemini-2.5-flash-lite",
+  "gemini-2.5-flash",
+];
+
 async function callGemini(apiKey: string, prompt: string) {
-  const maxRetries = 3;
+  // Try each model — if one fails (503/429/quota), try the next
+  for (const model of GEMINI_MODELS) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": apiKey,
+          },
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+        }
+      );
 
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": apiKey,
-        },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      if (res.status === 503 || res.status === 429) {
+        console.log(`Gemini ${model} ${res.status}, attempt ${attempt + 1}`);
+        await new Promise(r => setTimeout(r, 2000));
+        continue;
       }
-    );
 
-    if (res.status === 503 || res.status === 429) {
-      // Server busy or rate limited — wait and retry
-      const waitSec = (attempt + 1) * 3; // 3s, 6s, 9s
-      console.log(`Gemini ${res.status}, retrying in ${waitSec}s (attempt ${attempt + 1}/${maxRetries})`);
-      await new Promise(r => setTimeout(r, waitSec * 1000));
-      continue;
+      if (res.status === 404) {
+        // Model not available, skip to next
+        console.log(`Gemini ${model} not found, trying next`);
+        break;
+      }
+
+      if (!res.ok) {
+        const errText = await res.text();
+        // Quota exhausted for this model — try next
+        if (errText.includes("quota") || errText.includes("RESOURCE_EXHAUSTED")) {
+          console.log(`Gemini ${model} quota exceeded, trying next`);
+          break;
+        }
+        throw new Error(errText);
+      }
+
+      const data = await res.json();
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (text) {
+        console.log(`Gemini translation success with model: ${model}`);
+        return Response.json({ translation: text });
+      }
     }
-
-    if (!res.ok) throw new Error(await res.text());
-
-    const data = await res.json();
-    return Response.json({
-      translation: data.candidates?.[0]?.content?.parts?.[0]?.text || "번역 실패",
-    });
   }
 
-  throw new Error("Gemini 서버가 계속 응답하지 않습니다. 잠시 후 다시 시도해주세요.");
+  throw new Error("Gemini 모든 모델이 응답하지 않습니다. 잠시 후 다시 시도하거나 다른 AI를 선택해주세요.");
 }
 
 async function callClaude(apiKey: string, prompt: string) {

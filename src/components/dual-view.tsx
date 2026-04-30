@@ -123,7 +123,7 @@ export function DualView({ pdf, pages }: Props) {
       {/* Toolbar */}
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 flex-shrink-0 flex-wrap">
         <button
-          onClick={() => { setCurrentPage(p => Math.max(1, p - 1)); setShowTranslation(false); }}
+          onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
           disabled={currentPage <= 1}
           className="px-2.5 py-1 text-sm border border-zinc-300 dark:border-zinc-700 rounded-lg disabled:opacity-30"
         >
@@ -133,7 +133,7 @@ export function DualView({ pdf, pages }: Props) {
           {currentPage} / {pages.length}
         </span>
         <button
-          onClick={() => { setCurrentPage(p => Math.min(pages.length, p + 1)); setShowTranslation(false); }}
+          onClick={() => setCurrentPage(p => Math.min(pages.length, p + 1))}
           disabled={currentPage >= pages.length}
           className="px-2.5 py-1 text-sm border border-zinc-300 dark:border-zinc-700 rounded-lg disabled:opacity-30"
         >
@@ -185,44 +185,41 @@ export function DualView({ pdf, pages }: Props) {
         </div>
       )}
 
-      {/* Content area */}
-      <div className="flex-1 overflow-auto bg-zinc-100 dark:bg-zinc-900">
-        {showTranslation ? (
-          /* Translation view — clean readable text */
-          <div className="max-w-3xl mx-auto py-8 px-6">
-            {sentences.map((sentence, i) => {
-              const key = `${currentPage}-${i}`;
-              const trans = translations[key];
+      {/* Content area — both views always mounted, toggle with display */}
+      <div className="flex-1 overflow-auto bg-zinc-100 dark:bg-zinc-900 relative">
+        {/* PDF view — always rendered, hidden when showing translation */}
+        <div className={`flex justify-center p-4 ${showTranslation ? "hidden" : ""}`}>
+          <div className="shadow-xl">
+            <canvas ref={canvasRef} className="block bg-white" />
+          </div>
+        </div>
 
-              return (
-                <div key={i} className="mb-4 group">
-                  {trans ? (
-                    <p className="text-base leading-relaxed text-zinc-800 dark:text-zinc-200">
-                      {trans}
-                    </p>
-                  ) : translatingIdx === i ? (
-                    <p className="text-base text-zinc-400 animate-pulse">번역 중...</p>
-                  ) : (
-                    <p className="text-base text-zinc-400 italic">{sentence}</p>
-                  )}
-                  {/* Original text on hover */}
-                  {trans && (
-                    <p className="text-xs text-zinc-400 dark:text-zinc-600 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      {sentence}
-                    </p>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          /* PDF view — original rendered page */
-          <div className="flex justify-center p-4">
-            <div className="shadow-xl">
-              <canvas ref={canvasRef} className="block bg-white" />
-            </div>
-          </div>
-        )}
+        {/* Translation view */}
+        <div className={`max-w-3xl mx-auto py-8 px-6 ${showTranslation ? "" : "hidden"}`}>
+          {sentences.map((sentence, i) => {
+            const key = `${currentPage}-${i}`;
+            const trans = translations[key];
+
+            return (
+              <div key={i} className="mb-4 group">
+                {trans ? (
+                  <p className="text-base leading-relaxed text-zinc-800 dark:text-zinc-200">
+                    {trans}
+                  </p>
+                ) : translatingIdx === i ? (
+                  <p className="text-base text-zinc-400 animate-pulse">번역 중...</p>
+                ) : (
+                  <p className="text-base text-zinc-400 italic">{sentence}</p>
+                )}
+                {trans && (
+                  <p className="text-xs text-zinc-400 dark:text-zinc-600 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {sentence}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

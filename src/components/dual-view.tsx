@@ -100,35 +100,53 @@ export function DualView({ pdf, pages }: Props) {
     setTranslatingPage(pageNum);
     setError(null);
 
-    // Translate all lines of this page in one batch
-    const fullText = lines.map(l => l.text).join("\n");
+    // Split lines into chunks of 5 to avoid API rate limits
+    const CHUNK_SIZE = 5;
+    const chunks: typeof lines[] = [];
+    for (let i = 0; i < lines.length; i += CHUNK_SIZE) {
+      chunks.push(lines.slice(i, i + CHUNK_SIZE));
+    }
 
-    try {
-      const res = await fetch("/api/translate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: fullText, provider, apiKey, glossary }),
-      });
+    let lineOffset = 0;
+    for (let ci = 0; ci < chunks.length; ci++) {
+      const chunk = chunks[ci];
+      const chunkText = chunk.map(l => l.text).join("\n");
 
-      if (!res.ok) {
+      try {
+        const res = await fetch("/api/translate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: chunkText, provider, apiKey, glossary }),
+        });
+
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.error || `HTTP ${res.status}`);
+        }
+
         const data = await res.json();
-        throw new Error(data.error || `HTTP ${res.status}`);
+        const translatedLines = data.translation.split("\n");
+
+        for (let i = 0; i < chunk.length; i++) {
+          const key = `${pageNum}-${lineOffset + i}`;
+          setTranslations(prev => ({
+            ...prev,
+            [key]: translatedLines[i] || chunk[i].text,
+          }));
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "번역 실패";
+        setError(msg);
+        setTranslatingPage(null);
+        return; // Stop on error
       }
 
-      const data = await res.json();
-      const translatedLines = data.translation.split("\n");
+      lineOffset += chunk.length;
 
-      // Map translations back to line positions
-      for (let i = 0; i < lines.length; i++) {
-        const key = `${pageNum}-${i}`;
-        setTranslations(prev => ({
-          ...prev,
-          [key]: translatedLines[i] || lines[i].text,
-        }));
+      // Delay between chunks to respect rate limits (2 seconds for Gemini free tier)
+      if (ci < chunks.length - 1) {
+        await new Promise(r => setTimeout(r, 2000));
       }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "번역 실패";
-      setError(msg);
     }
 
     setTranslatingPage(null);

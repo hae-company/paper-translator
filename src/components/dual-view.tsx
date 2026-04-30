@@ -2,7 +2,6 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import type { PageData, TextBlock } from "@/lib/pdf-extract";
-import { renderPageToCanvas } from "@/lib/pdf-extract";
 import { getApiKey, getProvider, getGlossary } from "@/lib/storage";
 
 interface Props {
@@ -45,10 +44,44 @@ export function DualView({ pdf, pages }: Props) {
 
   const page = pages[currentPage - 1];
 
-  // Render PDF page to canvas
+  // Render PDF page to canvas — cancel previous render if page changes fast
+  const renderTaskRef = useRef<{ cancel: () => void } | null>(null);
+
   useEffect(() => {
     if (!canvasRef.current || !pdf) return;
-    renderPageToCanvas(pdf, currentPage, canvasRef.current);
+
+    // Cancel any in-progress render
+    if (renderTaskRef.current) {
+      renderTaskRef.current.cancel();
+      renderTaskRef.current = null;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const page = await pdf.getPage(currentPage);
+        if (cancelled) return;
+        const viewport = page.getViewport({ scale: 1.5 });
+        const canvas = canvasRef.current!;
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext("2d")!;
+        const task = page.render({ canvasContext: ctx, viewport });
+        renderTaskRef.current = task;
+        await task.promise;
+      } catch {
+        // Render cancelled or failed — ignore
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (renderTaskRef.current) {
+        renderTaskRef.current.cancel();
+        renderTaskRef.current = null;
+      }
+    };
   }, [pdf, currentPage]);
 
   const translatePage = useCallback(async (pageNum: number) => {

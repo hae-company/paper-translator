@@ -2,46 +2,48 @@ import { NextRequest } from "next/server";
 import { buildTranslationPrompt } from "@/lib/prompts";
 
 function parseApiError(raw: string, provider: string): string {
-  // Quota / billing
-  if (raw.includes("insufficient_quota") || raw.includes("exceeded your current quota")) {
-    return "GPT API 사용량이 초과되었습니다. platform.openai.com 에서 결제 정보를 확인해주세요.";
-  }
-  if (raw.includes("RESOURCE_EXHAUSTED") || raw.includes("quota") || raw.includes("429")) {
-    if (provider === "gemini") return "Gemini API 호출 한도 초과입니다. 잠시 후 다시 시도하거나 API 키의 할당량을 확인해주세요.";
-    if (provider === "claude") return "Claude API 호출 한도 초과입니다. 잠시 후 다시 시도해주세요.";
-    return "API 호출 한도가 초과되었습니다. 잠시 후 다시 시도해주세요.";
-  }
-  // Invalid key
-  if (raw.includes("invalid_api_key") || raw.includes("Incorrect API key")) {
-    return "GPT API 키가 올바르지 않습니다. 키를 다시 확인해주세요.";
-  }
-  if (raw.includes("API_KEY_INVALID") || raw.includes("API key not valid")) {
+  const p = provider.toUpperCase() || "AI";
+  const lower = raw.toLowerCase();
+
+  // Provider-specific key errors
+  if (provider === "gemini" && (lower.includes("api_key_invalid") || lower.includes("api key not valid"))) {
     return "Gemini API 키가 올바르지 않습니다. Google AI Studio에서 키를 확인해주세요.";
   }
-  if (raw.includes("authentication_error") || raw.includes("invalid x-api-key")) {
+  if (provider === "gpt" && (lower.includes("invalid_api_key") || lower.includes("incorrect api key"))) {
+    return "GPT API 키가 올바르지 않습니다. 키를 다시 확인해주세요.";
+  }
+  if (provider === "claude" && (lower.includes("authentication_error") || lower.includes("invalid x-api-key"))) {
     return "Claude API 키가 올바르지 않습니다. 키를 다시 확인해주세요.";
   }
+
+  // Quota / billing — provider-aware
+  if (lower.includes("quota") || lower.includes("resource_exhausted") || lower.includes("billing") || lower.includes("insufficient")) {
+    if (provider === "gemini") return "Gemini API 호출 한도가 초과되었습니다. 잠시 후 다시 시도하거나 Google AI Studio에서 할당량을 확인해주세요.";
+    if (provider === "gpt") return "GPT API 사용량이 초과되었습니다. platform.openai.com 에서 결제 정보를 확인해주세요.";
+    if (provider === "claude") return "Claude API 사용량이 초과되었습니다. Anthropic Console에서 확인해주세요.";
+    return `${p} API 사용량이 초과되었습니다.`;
+  }
+
   // Rate limit
-  if (raw.includes("rate_limit") || raw.includes("Rate limit") || raw.includes("Too Many Requests")) {
-    return "요청이 너무 빠릅니다. 잠시 후 다시 시도해주세요.";
+  if (lower.includes("rate_limit") || lower.includes("rate limit") || lower.includes("too many requests") || lower.includes("429")) {
+    return `${p} 요청이 너무 빠릅니다. 잠시 후 다시 시도해주세요.`;
   }
-  // Model not found
-  if (raw.includes("model_not_found") || raw.includes("does not exist") || raw.includes("not found")) {
-    return "모델을 찾을 수 없습니다. AI 설정을 확인해주세요.";
-  }
+
   // Content too long
-  if (raw.includes("context_length") || raw.includes("maximum context length") || raw.includes("too long")) {
+  if (lower.includes("context_length") || lower.includes("maximum") || lower.includes("too long") || lower.includes("too large")) {
     return "텍스트가 너무 깁니다. 페이지를 나눠서 번역해주세요.";
   }
+
   // Permission
-  if (raw.includes("permission") || raw.includes("forbidden") || raw.includes("403")) {
-    return `${provider.toUpperCase()} API 접근 권한이 없습니다. API 키 권한을 확인해주세요.`;
+  if (lower.includes("permission") || lower.includes("forbidden") || lower.includes("403")) {
+    return `${p} API 접근 권한이 없습니다. API 키 권한을 확인해주세요.`;
   }
-  // Generic - keep it short
+
+  // Generic fallback
   if (raw.length > 200) {
-    return `${provider.toUpperCase()} API 오류가 발생했습니다. API 키와 결제 상태를 확인해주세요.`;
+    return `${p} API 오류가 발생했습니다. API 키와 설정을 확인해주세요.`;
   }
-  return raw;
+  return `${p} 오류: ${raw}`;
 }
 
 export async function POST(req: NextRequest) {

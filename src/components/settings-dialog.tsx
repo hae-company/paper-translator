@@ -38,12 +38,18 @@ export function SettingsDialog({ open, onClose }: Props) {
     });
   }, [open]);
 
+  const [saved, setSaved] = useState(false);
+
   const save = () => {
     setProvider(selected);
     for (const p of providers) {
       setApiKey(p.id, keys[p.id]);
     }
-    onClose();
+    setSaved(true);
+    setTimeout(() => {
+      setSaved(false);
+      onClose();
+    }, 800);
   };
 
   if (!open) return null;
@@ -105,9 +111,13 @@ export function SettingsDialog({ open, onClose }: Props) {
           </button>
           <button
             onClick={save}
-            className="px-5 py-2 text-sm bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors"
+            className={`px-5 py-2 text-sm rounded-xl transition-colors ${
+              saved
+                ? "bg-green-600 text-white"
+                : "bg-blue-600 text-white hover:bg-blue-700"
+            }`}
           >
-            저장
+            {saved ? "저장됨!" : "저장"}
           </button>
         </div>
       </div>

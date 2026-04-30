@@ -6,7 +6,7 @@ import { DualView } from "@/components/dual-view";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { Footer } from "@/components/footer";
 import { extractTextFromPdf, type ParagraphBlock } from "@/lib/pdf-extract";
-import { getDarkMode, setDarkMode } from "@/lib/storage";
+import { getDarkMode, setDarkMode, getProvider, getApiKey } from "@/lib/storage";
 
 export default function Home() {
   const [blocks, setBlocks] = useState<ParagraphBlock[] | null>(null);
@@ -14,12 +14,17 @@ export default function Home() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [dark, setDark] = useState(false);
   const [fileName, setFileName] = useState("");
+  const [currentProvider, setCurrentProvider] = useState("");
+  const [hasKey, setHasKey] = useState(false);
 
   useEffect(() => {
     const d = getDarkMode();
     setDark(d);
     document.documentElement.classList.toggle("dark", d);
-  }, []);
+    const p = getProvider();
+    setCurrentProvider(p);
+    setHasKey(!!getApiKey(p));
+  }, [settingsOpen]); // re-check after settings close
 
   const toggleDark = () => {
     const next = !dark;
@@ -72,8 +77,17 @@ export default function Home() {
           </button>
           <button
             onClick={() => setSettingsOpen(true)}
-            className="px-3 py-1.5 text-sm border border-zinc-300 dark:border-zinc-700 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            className={`px-3 py-1.5 text-sm border rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors flex items-center gap-1.5 ${
+              hasKey
+                ? "border-green-400 dark:border-green-700 text-green-700 dark:text-green-400"
+                : "border-zinc-300 dark:border-zinc-700"
+            }`}
           >
+            {hasKey ? (
+              <span className="text-[10px] bg-green-100 dark:bg-green-900/30 px-1.5 py-0.5 rounded text-green-700 dark:text-green-400 uppercase">
+                {currentProvider}
+              </span>
+            ) : null}
             AI 설정
           </button>
         </div>

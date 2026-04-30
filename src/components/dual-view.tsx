@@ -163,8 +163,9 @@ export function DualView({ blocks }: Props) {
 
       {/* Error */}
       {error && (
-        <div className="px-4 py-2 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 text-sm">
-          {error}
+        <div className="px-4 py-3 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 text-sm border-b border-red-200 dark:border-red-900 flex items-center gap-2">
+          <span className="text-lg">&#9888;</span>
+          <span>{error}</span>
         </div>
       )}
 

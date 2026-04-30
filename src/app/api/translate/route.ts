@@ -71,7 +71,8 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     console.error("Translate API error:", err);
     const raw = err instanceof Error ? err.message : "Translation failed";
-    return Response.json({ error: parseApiError(raw, provider) }, { status: 500 });
+    console.error("Raw API error:", raw);
+    return Response.json({ error: parseApiError(raw, provider), raw: raw.slice(0, 500) }, { status: 500 });
   }
 }
 

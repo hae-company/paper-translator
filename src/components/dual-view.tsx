@@ -121,6 +121,7 @@ export function DualView({ pdf, pages }: Props) {
 
         if (!res.ok) {
           const data = await res.json();
+          console.error("Translation API error:", data);
           throw new Error(data.error || `HTTP ${res.status}`);
         }
 

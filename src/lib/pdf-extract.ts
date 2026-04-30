@@ -1,19 +1,10 @@
 import type { TextItem } from "pdfjs-dist/types/src/display/api";
 
-export interface TextBlock {
-  text: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  fontSize: number;
-}
-
 export interface PageData {
   pageNum: number;
   width: number;
   height: number;
-  blocks: TextBlock[];
+  sentences: string[];
 }
 
 export async function loadPdf(file: File) {
@@ -24,56 +15,82 @@ export async function loadPdf(file: File) {
 }
 
 export async function extractPageData(
-  pdf: { getPage: (n: number) => Promise<unknown>; numPages: number }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  pdf: any
 ): Promise<PageData[]> {
   const pages: PageData[] = [];
 
   for (let i = 1; i <= pdf.numPages; i++) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const page = await pdf.getPage(i) as any;
+    const page = await pdf.getPage(i);
     const viewport = page.getViewport({ scale: 1.5 });
     const content = await page.getTextContent();
 
-    const blocks: TextBlock[] = [];
-
-    for (const item of content.items) {
-      const t = item as TextItem;
-      if (!t.str || t.str.trim().length === 0) continue;
-
-      const tx = t.transform;
-      const fontSize = Math.sqrt(tx[0] * tx[0] + tx[1] * tx[1]);
-
-      blocks.push({
-        text: t.str,
-        x: tx[4] * 1.5, // scale factor
-        y: viewport.height - tx[5] * 1.5 - fontSize * 1.5, // flip Y
-        width: t.width * 1.5,
-        height: fontSize * 1.5 * 1.2,
-        fontSize: fontSize * 1.5,
-      });
+    const items = content.items as TextItem[];
+    if (items.length === 0) {
+      pages.push({ pageNum: i, width: viewport.width, height: viewport.height, sentences: [] });
+      continue;
     }
+
+    // Sort by Y (top to bottom), then X
+    const sorted = items
+      .filter((t) => t.str && t.str.trim().length > 0)
+      .map((t) => ({
+        str: t.str,
+        y: Math.round(t.transform[5]),
+        x: t.transform[4],
+        fontSize: Math.sqrt(t.transform[0] ** 2 + t.transform[1] ** 2),
+      }))
+      .sort((a, b) => b.y - a.y || a.x - b.x);
+
+    // Group into lines
+    const lines: string[] = [];
+    let currentLine = sorted[0].str;
+    let currentY = sorted[0].y;
+    let lastFontSize = sorted[0].fontSize;
+
+    for (let j = 1; j < sorted.length; j++) {
+      const item = sorted[j];
+      if (Math.abs(item.y - currentY) <= lastFontSize * 0.5) {
+        currentLine += item.str;
+      } else {
+        lines.push(currentLine.trim());
+        currentLine = item.str;
+        currentY = item.y;
+        lastFontSize = item.fontSize;
+      }
+    }
+    lines.push(currentLine.trim());
+
+    // Join all lines into one text block, then split by sentences
+    const fullText = lines.filter(l => l.length > 0).join(" ");
+    const sentences = splitIntoSentences(fullText);
 
     pages.push({
       pageNum: i,
       width: viewport.width,
       height: viewport.height,
-      blocks,
+      sentences,
     });
   }
 
   return pages;
 }
 
-export async function renderPageToCanvas(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  pdf: any,
-  pageNum: number,
-  canvas: HTMLCanvasElement
-) {
-  const page = await pdf.getPage(pageNum);
-  const viewport = page.getViewport({ scale: 1.5 });
-  canvas.width = viewport.width;
-  canvas.height = viewport.height;
-  const ctx = canvas.getContext("2d")!;
-  await page.render({ canvasContext: ctx, viewport }).promise;
+function splitIntoSentences(text: string): string[] {
+  // Split on sentence boundaries: period/question/exclamation followed by space and capital letter
+  // But avoid splitting on abbreviations like "e.g.", "i.e.", "et al.", numbers like "3.5"
+  const raw = text.split(/(?<=[.!?])\s+(?=[A-Z\d\[])/);
+
+  // Merge very short fragments (< 20 chars) with the previous sentence
+  const result: string[] = [];
+  for (const s of raw) {
+    const trimmed = s.trim();
+    if (trimmed.length === 0) continue;
+    if (trimmed.length < 20 && result.length > 0) {
+      result[result.length - 1] += " " + trimmed;
+    } else {
+      result.push(trimmed);
+    }
+  }
+  return result;
 }
